@@ -75,8 +75,8 @@ test "BLP":
   var file = mpq.readFile("""Interface\GLUES\Common\Glues-WoW-BCLogo.blp""")
   var texture = newBLPTextureFromData(file.data)
 
-  discard existsOrCreateDir("test_output")
-  echo savePNG32("test_output/logo.png", texture.mipmapsData, texture.header.width.int, texture.header.height.int)
+  # discard existsOrCreateDir("test_output")
+  # echo savePNG32("test_output/logo.png", texture.mipmapsData, texture.header.width.int, texture.header.height.int)
 
 # test "BLP2":
 #   var mpq = newMPQ(testFile)
