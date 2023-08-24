@@ -1,8 +1,3 @@
-# This is just an example to get you started. Users of your library will
-# import this file by writing ``import mpq/submodule``. Feel free to rename or
-# remove this file altogether. You may create additional modules alongside
-# this file as required.
-
 import unicode, private/dxt
 
 # https://wowpedia.fandom.com/wiki/BLP_files
@@ -37,19 +32,13 @@ type
     sizes*: array[16, uint32]
     palette: array[256, BLPColor]
 
-
-  # BLPDXHeaderAppendix {.packed.} = object
-  #   palette: array[256, BLPColor]
-
   BLPJPEGHeaderAppendix {.packed.} = object
     headerSize: uint32
     data: array[1020, byte]
 
   BLPTexture* = ref object
     header*: BLPHeader
-    # palette*: BLPDXHeaderAppendix
     mipmapsData*: seq[seq[byte]]
-    alphaData*: seq[seq[byte]]
 
 proc newBLPTextureFromData*(data: seq[byte]): BLPTexture =
   var r = new(BLPTexture)
@@ -67,11 +56,6 @@ proc newBLPTextureFromData*(data: seq[byte]): BLPTexture =
     readSize += r.header.sizes[i].int
     copyMem(addr r.mipmapsData[i][0], unsafeAddr data[r.header.offsets[i]], r.header.sizes[i])
 
-  # echo "header: ",sizeof(BLPHeader), " mipmapdata: ", readSize ," sum: ", sizeof(BLPHeader) + readSize,  " data size ", data.len
-  # r.mipmapsData.setLen(data.len - sizeof(BLPHeader))
-  # copyMem(addr r.mipmapsData[0], unsafeAddr data[sizeof(BLPHeader)], data.len - sizeof(BLPHeader))
-  # var fr = sizeof(BLPHeader) + readSize
-  # echo "left data :", data[fr .. ^1]
   if r.header.magic != 844123202:
     raise newException(Exception, "Invalid texture")
   return r
