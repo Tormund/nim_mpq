@@ -143,19 +143,23 @@ proc mpqHashString*(str: string, typ: MPQHashType): uint32 =
     seed2 = c + seed1 + seed2 + (seed2 shl 5) + 3
   result = seed1
 
-type DecrTyp = byte | char | uint8 | int8
-proc mpqDecryptTable*[DecrTyp](data: var openArray[DecrTyp], key: string) =
+# type DecrTyp = byte | char | uint8 | int8
+# proc mpqDecryptTable*[DecrTyp](data: var openArray[DecrTyp], key: string) =
+proc mpqDecryptTable*[T](data: var openArray[T], key: string) =
   var seed1 = mpqHashString(key, MPQHashType.tableKey)
   var seed2 = 0xEEEEEEEE'u32
+  var seqPtr: pointer = addr data[0];
+  const chunk = sizeof(uint32)
+  let dataSize = data.len * sizeof(T)
   var t: uint32
   var i = 0
-  while i < data.len:
+  while i < dataSize:
     seed2 += gMPQDecryptTable[0x400 + int(seed1 and 0xFF)]
-    copyMem(addr t, addr data[i], 4)
+    copyMem(addr t, cast[pointer](cast[int](seqPtr) + i), chunk)
     var c = t xor (seed1 + seed2)
     seed1 = ((not seed1 shl 0x15) + 0x11111111) or (seed1 shr 0x0B)
     seed2 = c + seed2 + (seed2 shl 5'u32) + 3'u32
-    copyMem(addr data[i], addr c, 4)
+    copyMem(cast[pointer](cast[int](seqPtr) + i), addr c, chunk)
     i += 4
 
 proc getBlockIndex*(o: MPQObj, name: string): uint32 =
@@ -167,6 +171,7 @@ proc getBlockIndex*(o: MPQObj, name: string): uint32 =
 
   while index < o.hashTable.len:
     var entry = o.hashTable[index]
+    # echo "index: ", index, " hashes (", hash1, ", ", hash2, ") != (", entry.hash1, ", ", entry.hash2, ")"
     if entry.hash1 == hash1 and entry.hash2 == hash2 and entry.blockIndex != 0xFFFFFFFF'u32:
       return entry.blockIndex
     inc index
@@ -186,29 +191,17 @@ template compressionType(src: var seq[byte]): MPQCompression =
 template dumpCompression(src: var seq[byte], path: string) =
   echo instantiationInfo(), " compression: ",  compressionType(src), " file: ", path
 
-proc mpqDecompress[T](dest: var T, src: var seq[byte], path: string) =
-  dumpCompression(src, path)
-  # let compr = compressionType(src)
-  # case compr:
-  # of MPQCompression.zlib:
+proc mpqDecompress[T](dest: var openArray[T], src: var seq[byte], path: string) =
+  # dumpCompression(src, path)
   var res = uncompress(addr src[1], src.len - 1)
   # todo: test this
-  copyMem(addr dest, addr src[1], sizeof(T))
-  # dest = cast[T](res)
-  # else:
-  #   raise newException(Exception, "Compression is not supported " & $compr)
+  copyMem(addr dest[0], addr res[0], res.len)
 
 proc mpqDecompress(dest: var seq[byte], offset: int, src: var seq[byte], path: string): int =
-  dumpCompression(src, path)
-  # let compr = compressionType(src)
-  # case compr:
-  # of MPQCompression.zlib:
+  # dumpCompression(src, path)
   var res = uncompress(addr src[1], src.len - 1)
   copyMem(addr dest[offset], addr res[0], res.len)
   result = res.len
-  #   return res.len
-  # else:
-  #   raise newException(Exception, "Compression is not supported " & $compr)
 
 proc readFile*(o: MPQObj, name: string): MPQFile =
   var index = o.getBlockIndex(name).int
@@ -316,49 +309,43 @@ proc init(o: MPQObj) =
   # HASH TABLE
   if o.header.hashTableEntries > MPQMaxTableEntries or (o.header.hashTableEntries and (o.header.hashTableEntries - 1)) > 0:
     raise newException(Exception, "Can't read hash table")
-  # o.hashTable.setLen(o.header.hashTableEntries)
+  o.hashTable.setLen(o.header.hashTableEntries)
   var hashTableSize = sizeof(MPQHashTableEntry).uint32 * o.header.hashTableEntries
   o.file.setPosition(hashTableOffset.int)
   if o.header.format >= uint16(MPQFormatVersion.v4) and o.headerV4.compressedHashTableSize != hashTableSize:
     if o.headerV4.compressedHashTableSize > hashTableSize:
       raise newException(Exception, "Can't read hash table")
-
     var buffer = newSeq[byte](o.headerV4.compressedHashTableSize)
-    if o.file.readData(addr buffer[0], int(o.headerV4.compressedHashTableSize)) != int(o.headerV4.compressedHashTableSize):
+    if o.file.readData(addr o.hashTable[0], int(o.headerV4.compressedHashTableSize)) != int(o.headerV4.compressedHashTableSize):
       raise newException(Exception, "Can't read hash table")
     mpqDecryptTable(buffer, "(hash table)")
     o.hashTable.mpqDecompress(buffer, o.path)
     echo "hashTable v4 ", o.hashTable
 
   else:
-    var buffer = newSeq[byte](hashTableSize)
-    if o.file.readData(addr buffer[0], int(hashTableSize)) != int(hashTableSize):
+    if o.file.readData(addr o.hashTable[0], int(hashTableSize)) != int(hashTableSize):
       raise newException(Exception, "Can't read hash table")
-    mpqDecryptTable(buffer, "(hash table)")
-    o.hashTable = cast[type(o.hashTable)](buffer)
+    mpqDecryptTable(o.hashTable, "(hash table)")
 
   # BLOCKs
   if o.header.blockTableEntries > MPQMaxTableEntries:
     raise newException(Exception, "Can't read block table")
   o.file.setPosition(blockTableOffset.int)
+  o.blockTable.setLen(o.header.blockTableEntries)
   var blockTableSize = sizeof(MPQBlockTableEntry).uint32 * o.header.blockTableEntries
   if o.header.format >= MPQFormatVersion.v4.uint16 and o.headerV4.compressedBlockTableSize != blockTableSize:
     if o.headerV4.compressedBlockTableSize > blockTableSize:
       raise newException(Exception, "Can't read block table")
-    var buffer = newSeq[byte](o.headerV4.compressedBlockTableSize)
-    if o.file.readData(addr buffer[0], int(o.headerV4.compressedBlockTableSize)) != int(o.headerV4.compressedBlockTableSize):
+    if o.file.readData(addr o.blockTable[0], int(o.headerV4.compressedBlockTableSize)) != int(o.headerV4.compressedBlockTableSize):
       raise newException(Exception, "Can't read block table")
-    mpqDecryptTable(buffer, "(block table)")
-    o.blockTable = cast[type(o.blockTable)](buffer)
+    mpqDecryptTable(o.blockTable, "(block table)")
   else:
-    var buffer = newSeq[byte](blockTableSize)
-    if o.file.readData(addr buffer[0], int(blockTableSize)) != int(blockTableSize):
+    if o.file.readData(addr o.blockTable[0], int(blockTableSize)) != int(blockTableSize):
       raise newException(Exception, "Can't read block table")
-    mpqDecryptTable(buffer, "(block table)")
-    o.blockTable = cast[type(o.blockTable)](buffer)
-    echo "block table ", o.blockTable[0]
+    mpqDecryptTable(o.blockTable, "(block table)")
 
   # Hight block table
+  o.highBlockTable.setLen(o.header.blockTableEntries)
   if o.header.format > MPQFormatVersion.v2.uint16 and o.headerv2.highBlockTableOffset > 0:
     o.file.setPosition(o.headerv2.highBlockTableOffset.int)
     var highBlockTableSize = sizeof(MPQHighBlockTableEntry).uint32 * o.header.blockTableEntries
@@ -370,10 +357,8 @@ proc init(o: MPQObj) =
         raise newException(Exception, "Can't read high block table")
       o.highBlockTable.mpqDecompress(buffer, o.path)
     else:
-      var buffer = newSeq[byte](highBlockTableSize)
-      if o.file.readData(addr buffer[0], int(highBlockTableSize)) != int(highBlockTableSize):
+      if o.file.readData(addr o.highBlockTable[0], int(highBlockTableSize)) != int(highBlockTableSize):
         raise newException(Exception, "Can't read high block table")
-      o.highBlockTable = cast[type(o.highBlockTable)](buffer)
       echo "high block table ", o.highBlockTable[0]
   o.isInitialized = true
 

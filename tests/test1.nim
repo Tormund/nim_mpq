@@ -5,7 +5,7 @@
 #
 # To run these tests, simply execute `nimble test`.
 
-import unittest, os
+import unittest, os, strutils
 import nimPNG
 import mpq, mpq/blp
 const testFile = """E:\Games\World of Warcraft\Data\common.MPQ"""
@@ -58,15 +58,19 @@ test "readFile ":
   flags.dumpFlags()
   echo "Size - ", size, " flags - ", flags
 
-  # mpq.getFileInfo("Interface\\GLUES\\Credits\\1024px-Blade3_final1.blp", size, flags)
-  # flags.dumpFlags()
+  mpq.getFileInfo("Interface\\GLUES\\Credits\\1024px-Blade3_final1.blp", size, flags)
+  flags.dumpFlags()
+  echo "Size - ", size, " flags - ", flags
   # echo "Size - ", size
 
   # var file = mpq.readFile("Interface\\GLUES\\Credits\\1024px-Blade3_final1.blp")
   # echo cast[string](file.data)
-
+test "listfiles":
+  var mpq = newMPQ(testFile3)
+  check mpq != nil
   var file2 = mpq.readFile("(listfile)")
   echo cast[string](file2.data)
+  mpq.free()
 
 test "BLP":
   var mpq = newMPQ(testFile3)
@@ -75,8 +79,63 @@ test "BLP":
   var file = mpq.readFile("""Interface\GLUES\Common\Glues-WoW-BCLogo.blp""")
   var texture = newBLPTextureFromData(file.data)
 
-  # discard existsOrCreateDir("test_output")
-  # echo savePNG32("test_output/logo.png", texture.mipmapsData, texture.header.width.int, texture.header.height.int)
+  discard existsOrCreateDir("test_output")
+  echo savePNG32("test_output/logo.png", texture.getBitmap(), texture.header.width.int, texture.header.height.int)
+  mpq.free()
+
+test "BLP raw1 alpha 1":
+  var mpq = newMPQ(testFile)
+  check mpq != nil
+
+  var file = mpq.readFile("""CHARACTER\Human\Female\HumanFemaleHairLongWavy.blp""")
+  var texture = newBLPTextureFromData(file.data)
+
+  discard existsOrCreateDir("test_output")
+  echo savePNG32("test_output/HumanFemaleHairLongWavy.png", texture.getBitmap(), texture.header.width.int, texture.header.height.int)
+  mpq.free()
+
+
+test "all BLP to PNG files":
+  var mpq = newMPQ(testFile)
+  check mpq != nil
+
+  var listfile = cast[string](mpq.readFile("(listfile)").data).splitLines
+  for line in listfile:
+    echo "blp ", line
+    var sp = splitFile(line)
+    if sp.ext != ".blp":
+      continue
+
+    var file = mpq.readFile(line)
+    var texture = newBLPTextureFromData(file.data)
+
+    discard existsOrCreateDir("test_output")
+    echo savePNG32("test_output/" & splitFile(line).name & ".png", texture.getBitmap(), texture.header.width.int, texture.header.height.int)
+
+  mpq.free()
+
+
+
+# test "stress_test":
+#   for i in 0 ..< 100:
+#     var mpq = newMPQ(testFile3)
+#     check mpq != nil
+#     var size: uint32 = 0
+#     var flags: uint32 = 0
+#     mpq.getFileInfo("(listfile)", size, flags)
+#     flags.dumpFlags()
+#     echo "Size - ", size, " flags - ", flags
+
+#     # mpq.getFileInfo("Interface\\GLUES\\Credits\\1024px-Blade3_final1.blp", size, flags)
+#     # flags.dumpFlags()
+#     # echo "Size - ", size
+
+#     # var file = mpq.readFile("Interface\\GLUES\\Credits\\1024px-Blade3_final1.blp")
+#     # echo cast[string](file.data)
+
+#     var file2 = mpq.readFile("(listfile)")
+#     echo cast[string](file2.data)
+#     mpq.free()
 
 # test "BLP2":
 #   var mpq = newMPQ(testFile)
